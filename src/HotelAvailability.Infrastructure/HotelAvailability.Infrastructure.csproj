@@ -14,4 +14,13 @@
     <ProjectReference Include="..\HotelAvailability.Core\HotelAvailability.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Data\bookings.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Data\hotels.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

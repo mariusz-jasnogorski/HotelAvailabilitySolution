@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "HotelAvailability.ConsoleApp": {
+      "commandName": "Project",
+      "commandLineArgs": "--hotels Data\\hotels.json --bookings Data\\bookings.json "
+    }
+  }
+}
