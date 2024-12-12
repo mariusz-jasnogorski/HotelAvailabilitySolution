@@ -13,80 +13,132 @@ namespace HotelAvailability.ConsoleApp
     {
         static void Main(string[] args)
         {
+            var hotelsArgIndex = Array.IndexOf(args, "--hotels");
+            var bookingsArgIndex = Array.IndexOf(args, "--bookings");
+
+            if (hotelsArgIndex < 0 || bookingsArgIndex < 0 ||
+                hotelsArgIndex == args.Length - 1 || bookingsArgIndex == args.Length - 1)
+            {
+                Console.WriteLine("Please provide --hotels <file> and --bookings <file>");
+                return;
+            }
+
+            var hotelsPath = args[hotelsArgIndex + 1];
+            var bookingsPath = args[bookingsArgIndex + 1];
+
             // Configure Serilog
             Log.Logger = new LoggerConfiguration()
                 .WriteTo.Console()
-                .MinimumLevel.Debug()
+                .MinimumLevel.Warning()
                 .CreateLogger();
 
+            Log.Information("Starting application...");
+
+            var serviceProvider = ConfigureServices(hotelsPath, bookingsPath);
+
+            var hotelService = serviceProvider.GetService<IHotelService>();
+
+            while (true)
+            {
+                Console.WriteLine("Enter command (blank line to exit):");
+                var command = Console.ReadLine();
+
+                if (string.IsNullOrWhiteSpace(command)) break;
+
+                switch (GetCommandType(command))
+                {
+                    case "Availability":
+                        HandleAvailability(hotelService, command);
+                        break;
+
+                    case "Search":
+                        HandleSearch(hotelService, command);
+                        break;
+
+                    default:
+                        Console.WriteLine("Unknown command.");
+                        break;
+                }
+            }
+            
+            Log.Information("Shutting down application...");
+            Log.CloseAndFlush();
+        }
+
+        static string GetCommandType(string command)
+        {
+            if (command.StartsWith("Availability", StringComparison.OrdinalIgnoreCase)) return "Availability";
+            if (command.StartsWith("Search", StringComparison.OrdinalIgnoreCase)) return "Search";
+            return "Unknown";
+        }
+
+        static void HandleAvailability(IHotelService hotelService, string command)
+        {
             try
             {
-                Log.Information("Starting application...");
+                // Extract parameters
+                var parts = ExtractParameters(command, "Availability");
+                var hotelId = parts[0];
+                var dateRange = parts[1];
+                var roomType = parts[2];
 
-                var serviceProvider = ConfigureServices(args);
+                var (startDate, endDate) = ParseDateRange(dateRange);
 
-                var hotelService = serviceProvider.GetService<IHotelService>();
+                var availability = hotelService.GetAvailability(hotelId, roomType, startDate, endDate);
 
-                while (true)
-                {
-                    Console.WriteLine("Enter command:");
-                    var command = Console.ReadLine();
-                    if (string.IsNullOrWhiteSpace(command)) break;
-
-                    if (command.StartsWith("Availability"))
-                    {
-                        var parts = command.Replace("Availability(", "").Replace(")", "").Split(",", StringSplitOptions.TrimEntries);
-                        var hotelId = parts[0];
-                        var dateRange = parts[1];
-                        var roomType = parts[2];
-
-                        DateTime startDate, endDate;
-
-                        if (dateRange.Contains('-'))
-                        {
-                            var dateParts = dateRange.Split('-');
-                            startDate = DateTime.ParseExact(dateParts[0], "yyyyMMdd", null);
-                            endDate = DateTime.ParseExact(dateParts[1], "yyyyMMdd", null);
-                        }
-                        else
-                        {
-                            startDate = DateTime.ParseExact(dateRange, "yyyyMMdd", null);
-                            endDate = startDate;
-                        }
-
-                        var availability = hotelService.GetAvailability(hotelId, roomType, startDate, endDate);
-                        Console.WriteLine($"Availability: {availability}");
-                    }
-                    else if (command.StartsWith("Search"))
-                    {
-                        var parts = command.Replace("Search(", "").Replace(")", "").Split(",", StringSplitOptions.TrimEntries);
-                        var hotelId = parts[0];
-                        var daysAhead = int.Parse(parts[1]);
-                        var roomType = parts[2];
-
-                        var availability = hotelService.SearchAvailability(hotelId, daysAhead, roomType);
-                        var result = string.Join(", ", availability.Select(a => $"({a.Start:yyyyMMdd}-{a.End:yyyyMMdd}, {a.Availability})"));
-                        Console.WriteLine(string.IsNullOrWhiteSpace(result) ? "" : result);
-                    }
-                }
+                Console.WriteLine($"Availability: {availability}");
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "An error occurred while running the application.");
-            }
-            finally
-            {
-                Log.Information("Shutting down application...");
-                Log.CloseAndFlush();
+                Log.Error(ex.Message);
             }
         }
 
-        private static ServiceProvider ConfigureServices(string[] args)
+        static void HandleSearch(IHotelService hotelService, string command)
         {
-            // File paths from arguments
-            var hotelFile = args[1];
-            var bookingFile = args[3];
+            try
+            { 
+                // Extract parameters
+                var parts = ExtractParameters(command, "Search");
+                var hotelId = parts[0];
+                var daysAhead = int.Parse(parts[1]);
+                var roomType = parts[2];
 
+                var availability = hotelService.SearchAvailability(hotelId, daysAhead, roomType);
+                var result = string.Join(", ", availability.Select(a => $"({a.Start:yyyyMMdd}-{a.End:yyyyMMdd}, {a.Availability})"));
+
+                Console.WriteLine(string.IsNullOrWhiteSpace(result) ? "" : result);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex.Message);
+            }
+        }
+
+        static (DateTime start, DateTime end) ParseDateRange(string range)
+        {
+            if (range.Contains('-'))
+            {
+                var dateParts = range.Split('-');
+                return (ParseExact(dateParts[0]), ParseExact(dateParts[1]));
+            }
+
+            var singleDate = ParseExact(range);
+            return (singleDate, singleDate);
+
+            static DateTime ParseExact(string dateStr) => DateTime.ParseExact(dateStr, "yyyyMMdd", null);
+        }
+
+        static string[] ExtractParameters(string command, string prefix)
+        {
+            return command
+                .Replace(prefix + "(", "")
+                .Replace(")", "")
+                .Split(",", StringSplitOptions.TrimEntries);
+        }
+
+        private static ServiceProvider ConfigureServices(string hotelsFile, string bookingsFile)
+        {           
             // DI container setup
             var services = new ServiceCollection();
 
@@ -98,8 +150,8 @@ namespace HotelAvailability.ConsoleApp
             });
 
             // Register repositories
-            services.AddSingleton<IHotelRepository>(sp => new HotelRepository(hotelFile));
-            services.AddSingleton<IBookingRepository>(sp => new BookingRepository(bookingFile));
+            services.AddSingleton<IHotelRepository>(sp => new HotelRepository(hotelsFile));
+            services.AddSingleton<IBookingRepository>(sp => new BookingRepository(bookingsFile));
 
             // Register services
             services.AddSingleton<IHotelService, HotelService>();
